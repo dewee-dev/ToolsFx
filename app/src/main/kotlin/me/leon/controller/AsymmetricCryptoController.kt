@@ -1,17 +1,8 @@
 package me.leon.controller
 
-import java.io.ByteArrayInputStream
-import java.io.ByteArrayOutputStream
-import java.security.KeyFactory
-import java.security.Security
-import java.security.cert.CertificateFactory
-import java.security.spec.PKCS8EncodedKeySpec
-import java.security.spec.X509EncodedKeySpec
-import javax.crypto.Cipher
-import me.leon.encode.base.*
-import me.leon.ext.catch
-import me.leon.ext.lineAction2String
-import org.bouncycastle.jce.provider.BouncyCastleProvider
+import me.leon.DEBUG
+import me.leon.ext.*
+import me.leon.ext.crypto.*
 import tornadofx.*
 
 class AsymmetricCryptoController : Controller() {
@@ -20,60 +11,55 @@ class AsymmetricCryptoController : Controller() {
         key: String,
         alg: String,
         data: String,
-        length: Int = 1024,
-        isSingleLine: Boolean = false,
-        reserved: Int = 11
-    ) =
-        if (isSingleLine) data.lineAction2String { pubEncrypt(key, alg, it, length, reserved) }
-        else pubEncrypt(key, alg, data, length, reserved)
-
-    fun pubEncrypt(key: String, alg: String, data: String, length: Int = 1024, reserved: Int = 11) =
+        singleLine: Boolean = false,
+        reserved: Int = 11,
+        inputEncode: String = "raw",
+        outputEncode: String = "base64"
+    ): String =
         catch({ "encrypt error: $it}" }) {
-            println("encrypt $key  $alg $data")
-            val keySpec = X509EncodedKeySpec(getPropPublicKey(key))
-            val keyFac = if (alg.contains("/")) alg.substringBefore('/') else alg
-            val publicKey = KeyFactory.getInstance(keyFac).generatePublic(keySpec)
-            Cipher.getInstance(alg).run {
-                init(Cipher.ENCRYPT_MODE, publicKey)
-                data.toByteArray()
-                    .toList()
-                    .chunked(length / BYTE_BITS - reserved) {
-                        println(it.size)
-                        this.doFinal(it.toByteArray())
-                    }
-                    .fold(ByteArrayOutputStream()) { acc, bytes -> acc.also { acc.write(bytes) } }
-                    .toByteArray()
-                    .base64()
+            if (DEBUG) println("encrypt $key  $alg $data")
+            if (singleLine) {
+                data.lineAction2String {
+                    it.decodeToByteArray(inputEncode)
+                        .pubEncrypt(key, alg, reserved)
+                        .encodeTo(outputEncode)
+                }
+            } else {
+                data
+                    .decodeToByteArray(inputEncode)
+                    .pubEncrypt(key, alg, reserved)
+                    .encodeTo(outputEncode)
             }
         }
+
+    fun lengthFromPub(key: String): Int = key.toPublicKey("RSA")!!.bitLength()
+
+    fun lengthFromPri(key: String): Int = key.toPrivateKey("RSA")!!.bitLength()
+
+    fun parseInfo(key: String, alg: String) =
+        runCatching { key.toPublicKey(alg) }
+            .onFailure { println(it.stackTraceToString()) }
+            .getOrElse { key.toPrivateKey(alg) }
+            ?.parseRsaInfo()
 
     fun priDecrypt(
         key: String,
         alg: String,
         data: String,
-        length: Int = 1024,
-        isSingleLine: Boolean = false
-    ) =
-        if (isSingleLine) data.lineAction2String { priDecrypt(key, alg, it, length) }
-        else priDecrypt(key, alg, data, length)
-
-    fun priDecrypt(key: String, alg: String, data: String, length: Int = 1024) =
+        singleLine: Boolean = false,
+        inputEncode: String = "base64",
+        outputEncode: String = "raw"
+    ): String =
         catch({ "decrypt error: $it" }) {
-            println("decrypt $key  $alg $data")
-            val keySpec = PKCS8EncodedKeySpec(key.base64Decode())
-            val keyFac = if (alg.contains("/")) alg.substringBefore('/') else alg
-            val privateKey = KeyFactory.getInstance(keyFac).generatePrivate(keySpec)
-            Cipher.getInstance(alg).run {
-                init(Cipher.DECRYPT_MODE, privateKey)
-                data.base64Decode()
-                    .toList()
-                    .chunked(length / BYTE_BITS) {
-                        println(it.size)
-                        this.doFinal(it.toByteArray())
-                    }
-                    .fold(ByteArrayOutputStream()) { acc, bytes -> acc.also { acc.write(bytes) } }
-                    .toByteArray()
-                    .toString(Charsets.UTF_8)
+            if (DEBUG) println("decrypt $key  $alg $data")
+            if (singleLine) {
+                data.lineAction2String {
+                    it.decodeToByteArray(inputEncode)
+                        .privateDecrypt(key, alg)
+                        .encodeTo(outputEncode)
+                }
+            } else {
+                data.decodeToByteArray(inputEncode).privateDecrypt(key, alg).encodeTo(outputEncode)
             }
         }
 
@@ -81,30 +67,23 @@ class AsymmetricCryptoController : Controller() {
         key: String,
         alg: String,
         data: String,
-        length: Int = 1024,
-        isSingleLine: Boolean = false,
-        reserved: Int = 11
-    ) =
-        if (isSingleLine) data.lineAction2String { priEncrypt(key, alg, it, length, reserved) }
-        else priEncrypt(key, alg, data, length, reserved)
-
-    fun priEncrypt(key: String, alg: String, data: String, length: Int = 1024, reserved: Int = 11) =
+        singleLine: Boolean = false,
+        reserved: Int = 11,
+        inputEncode: String = "raw",
+        outputEncode: String = "base64"
+    ): String =
         catch({ "encrypt error: $it" }) {
-            println("pri encrypt $key  $alg $data")
-            val keySpec = PKCS8EncodedKeySpec(key.base64Decode())
-            val keyFac = if (alg.contains("/")) alg.substringBefore('/') else alg
-            val privateKey = KeyFactory.getInstance(keyFac).generatePrivate(keySpec)
-            Cipher.getInstance(alg).run {
-                init(Cipher.ENCRYPT_MODE, privateKey)
-                data.toByteArray()
-                    .toList()
-                    .chunked(length / BYTE_BITS - reserved) {
-                        println(it.size)
-                        this.doFinal(it.toByteArray())
-                    }
-                    .fold(ByteArrayOutputStream()) { acc, bytes -> acc.also { acc.write(bytes) } }
-                    .toByteArray()
-                    .base64()
+            if (singleLine) {
+                data.lineAction2String {
+                    it.decodeToByteArray(inputEncode)
+                        .privateEncrypt(key, alg, reserved)
+                        .encodeTo(outputEncode)
+                }
+            } else {
+                data
+                    .decodeToByteArray(inputEncode)
+                    .privateEncrypt(key, alg, reserved)
+                    .encodeTo(outputEncode)
             }
         }
 
@@ -112,43 +91,18 @@ class AsymmetricCryptoController : Controller() {
         key: String,
         alg: String,
         data: String,
-        length: Int = 1024,
-        isSingleLine: Boolean = false
+        singleLine: Boolean = false,
+        inputEncode: String = "base64",
+        outputEncode: String = "raw"
     ) =
-        if (isSingleLine) data.lineAction2String { pubDecrypt(key, alg, it, length) }
-        else pubDecrypt(key, alg, data, length)
-
-    private fun pubDecrypt(key: String, alg: String, data: String, length: Int = 1024) =
         catch({ "decrypt error: $it" }) {
-            println("decrypt $key  $alg $data")
-            val keySpec = X509EncodedKeySpec(getPropPublicKey(key))
-            val keyFac = if (alg.contains("/")) alg.substringBefore('/') else alg
-            val publicKey = KeyFactory.getInstance(keyFac).generatePublic(keySpec)
-            Cipher.getInstance(alg).run {
-                init(Cipher.DECRYPT_MODE, publicKey)
-                data.base64Decode()
-                    .toList()
-                    .chunked(length / BYTE_BITS) { this.doFinal(it.toByteArray()) }
-                    .fold(ByteArrayOutputStream()) { acc, bytes -> acc.also { acc.write(bytes) } }
-                    .toByteArray()
-                    .toString(Charsets.UTF_8)
+            if (DEBUG) println("decrypt $key  $alg $data")
+            if (singleLine) {
+                data.lineAction2String {
+                    it.decodeToByteArray(inputEncode).pubDecrypt(key, alg).encodeTo(outputEncode)
+                }
+            } else {
+                data.decodeToByteArray(inputEncode).pubDecrypt(key, alg).encodeTo(outputEncode)
             }
         }
-
-    private fun getPropPublicKey(key: String) =
-        if (key.contains("-----BEGIN CERTIFICATE-----")) {
-            val byteArrayInputStream = ByteArrayInputStream(key.toByteArray())
-            CertificateFactory.getInstance("X.509")
-                .generateCertificate(byteArrayInputStream)
-                .publicKey
-                .encoded
-        } else {
-            key.base64Decode()
-        }
-
-    companion object {
-        init {
-            Security.addProvider(BouncyCastleProvider())
-        }
-    }
 }
